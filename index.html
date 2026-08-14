@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>TEN GARDEN</title>
+<style>
+  :root{
+    --bg-top:#eef7ec;
+    --bg-bottom:#dcefd9;
+    --ink:#2e3d2a;
+    --ink-soft:#5c6f56;
+    --tile:#ffffff;
+    --tile-border:#cfe3c8;
+    --tile-selected:#ffe3a6;
+    --tile-selected-border:#f2b93f;
+    --tile-ready:#bdeecb;
+    --tile-ready-border:#4caf6e;
+    --tile-reject:#ffd3d3;
+    --tile-reject-border:#e2635f;
+    --accent:#4c8c5c;
+    --accent-deep:#356a41;
+    --panel:#ffffffcc;
+    --shadow:0 2px 10px rgba(46,61,42,0.12);
+    --danger:#c85a52;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0;
+    overflow-x:hidden;
+    overscroll-behavior:none;
+    background:linear-gradient(180deg,var(--bg-top),var(--bg-bottom));
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  body{
+    min-height:100vh;
+    min-height:100dvh;
+    display:flex;
+    justify-content:center;
+  }
+  .wrap{
+    width:100%;
+    max-width:480px;
+    min-width:0;
+    padding:calc(env(safe-area-inset-top,0px) + 14px) 14px calc(env(safe-area-inset-bottom,0px) + 14px);
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    user-select:none;
+    -webkit-user-select:none;
+  }
+
+  header{ text-align:center; }
+  h1{
+    margin:0;
+    font-size:26px;
+    letter-spacing:2px;
+    color:var(--accent-deep);
+    font-weight:800;
+  }
+  .rule-line{
+    margin:4px 0 0;
+    font-size:13px;
+    color:var(--ink-soft);
+    line-height:1.4;
+  }
+
+  .hud{
+    display:flex;
+    gap:8px;
+    align-items:stretch;
+  }
+  .panel{
+    background:var(--panel);
+    border-radius:14px;
+    box-shadow:var(--shadow);
+    padding:8px 12px;
+  }
+  .score-panel{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .score-panel .label{ font-size:11px; color:var(--ink-soft); }
+  .score-panel .value{ font-size:22px; font-weight:800; color:var(--accent-deep); }
+  .best-panel{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .best-panel .label{ font-size:11px; color:var(--ink-soft); }
+  .best-panel .value{ font-size:16px; font-weight:700; color:var(--ink); }
+
+  .sum-readout{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    min-width:64px;
+  }
+  .sum-readout .num{
+    font-size:24px;
+    font-weight:800;
+    color:var(--ink-soft);
+    transition:color .12s;
+  }
+  .sum-readout.ready .num{ color:var(--accent-deep); }
+  .sum-readout.over .num{ color:var(--danger); }
+  .sum-readout .of10{ font-size:11px; color:var(--ink-soft); }
+
+  .board-frame{
+    background:var(--panel);
+    border-radius:18px;
+    box-shadow:var(--shadow);
+    padding:8px;
+    min-width:0;
+  }
+  .board{
+    display:grid;
+    grid-template-columns:repeat(6,1fr);
+    gap:6px;
+    aspect-ratio:1/1;
+    touch-action:none;
+  }
+  .tile{
+    position:relative;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--tile);
+    border:2px solid var(--tile-border);
+    border-radius:10px;
+    font-size:clamp(15px,5.2vw,24px);
+    font-weight:800;
+    color:var(--ink);
+    touch-action:none;
+    transition:transform .08s, background .08s, border-color .08s;
+  }
+  .tile.empty{ background:transparent; border-color:transparent; }
+  .tile.selected{
+    background:var(--tile-selected);
+    border-color:var(--tile-selected-border);
+    transform:scale(0.94);
+  }
+  .tile.selected.ready{
+    background:var(--tile-ready);
+    border-color:var(--tile-ready-border);
+  }
+  .tile.reject{
+    animation:shake .22s;
+    background:var(--tile-reject);
+    border-color:var(--tile-reject-border);
+  }
+  .tile.new-tile{
+    animation:drop .22s ease-out;
+  }
+  @keyframes shake{
+    0%,100%{ transform:translateX(0); }
+    25%{ transform:translateX(-4px); }
+    75%{ transform:translateX(4px); }
+  }
+  @keyframes drop{
+    0%{ transform:translateY(-14px); opacity:0; }
+    100%{ transform:translateY(0); opacity:1; }
+  }
+
+  .footer-stats{
+    display:flex;
+    gap:8px;
+  }
+  .stat-chip{
+    flex:1;
+    background:var(--panel);
+    border-radius:12px;
+    box-shadow:var(--shadow);
+    padding:7px 8px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:2px;
+  }
+  .stat-chip .icon{ font-size:16px; }
+  .stat-chip .num{ font-size:14px; font-weight:800; color:var(--accent-deep); }
+  .stat-chip .label{ font-size:10px; color:var(--ink-soft); }
+
+  .gauge{
+    display:flex;
+    gap:4px;
+    justify-content:center;
+  }
+  .gauge .dot{
+    width:8px; height:8px;
+    border-radius:50%;
+    background:#d7e6d1;
+  }
+  .gauge .dot.filled{ background:var(--accent); }
+
+  .bottom-row{ display:flex; gap:8px; align-items:center; }
+  .reset-btn{
+    border:none;
+    background:var(--panel);
+    box-shadow:var(--shadow);
+    border-radius:12px;
+    padding:8px 14px;
+    font-size:13px;
+    color:var(--ink-soft);
+    font-weight:700;
+  }
+  .reset-btn:active{ transform:scale(0.97); }
+
+  .overlay{
+    position:fixed; inset:0;
+    background:rgba(46,61,42,0.55);
+    display:flex; align-items:center; justify-content:center;
+    padding:20px;
+    z-index:10;
+  }
+  .overlay.hidden{ display:none; }
+  .overlay-card{
+    background:#fff;
+    border-radius:20px;
+    padding:26px 22px;
+    max-width:340px;
+    width:100%;
+    text-align:center;
+    box-shadow:0 10px 30px rgba(0,0,0,0.25);
+  }
+  .overlay-card h2{
+    margin:0 0 4px;
+    color:var(--accent-deep);
+    font-size:22px;
+  }
+  .overlay-card .sub{ font-size:12px; color:var(--ink-soft); margin-bottom:14px; }
+  .overlay-stats{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    margin-bottom:18px;
+  }
+  .overlay-stat-row{
+    display:flex;
+    justify-content:space-between;
+    font-size:14px;
+    padding:6px 10px;
+    background:#f4f9f2;
+    border-radius:10px;
+  }
+  .overlay-stat-row .k{ color:var(--ink-soft); }
+  .overlay-stat-row .v{ font-weight:800; color:var(--ink); }
+  .overlay-stat-row.new-best .v{ color:var(--accent-deep); }
+  .play-again{
+    width:100%;
+    border:none;
+    background:var(--accent);
+    color:#fff;
+    font-weight:800;
+    font-size:15px;
+    padding:12px;
+    border-radius:12px;
+  }
+  .play-again:active{ transform:scale(0.98); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>TEN GARDEN</h1>
+    <p class="rule-line">인접한 숫자를 이어 합이 10이 되게 하세요.<br>길게 연결할수록 더 많은 공간을 만들고 꽃을 피웁니다.</p>
+  </header>
+
+  <div class="hud">
+    <div class="panel score-panel">
+      <div class="label">SCORE</div>
+      <div class="value" id="scoreVal">0</div>
+    </div>
+    <div class="panel sum-readout" id="sumReadout">
+      <div class="num" id="sumVal">0</div>
+      <div class="of10">/10</div>
+    </div>
+    <div class="panel best-panel">
+      <div class="label">BEST</div>
+      <div class="value" id="bestVal">0</div>
+    </div>
+  </div>
+
+  <div class="board-frame">
+    <div class="board" id="board"></div>
+  </div>
+
+  <div class="footer-stats">
+    <div class="stat-chip">
+      <div class="icon">🌸</div>
+      <div class="num" id="flowerVal">0</div>
+      <div class="label">꽃</div>
+    </div>
+    <div class="stat-chip">
+      <div class="icon">🌻</div>
+      <div class="num" id="bigFlowerVal">0</div>
+      <div class="label">큰 꽃</div>
+    </div>
+    <div class="stat-chip">
+      <div class="icon">🔗</div>
+      <div class="num" id="chainVal">0</div>
+      <div class="label">최장 연결</div>
+    </div>
+    <div class="stat-chip">
+      <div class="icon">🌱</div>
+      <div class="gauge" id="gauge"></div>
+    </div>
+  </div>
+
+  <div class="bottom-row">
+    <button class="reset-btn" id="resetBtn">↻ 새 게임</button>
+  </div>
+</div>
+
+<div class="overlay hidden" id="overlay">
+  <div class="overlay-card">
+    <h2>정원이 가득 찼습니다</h2>
+    <div class="sub">더 이상 새 숫자를 놓을 자리가 없어요</div>
+    <div class="overlay-stats">
+      <div class="overlay-stat-row" id="finalScoreRow"><span class="k">이번 점수</span><span class="v" id="finalScore">0</span></div>
+      <div class="overlay-stat-row"><span class="k">최고 점수</span><span class="v" id="finalBest">0</span></div>
+      <div class="overlay-stat-row"><span class="k">최장 연결</span><span class="v" id="finalChain">0</span></div>
+      <div class="overlay-stat-row"><span class="k">피운 꽃</span><span class="v" id="finalFlowers">0</span></div>
+    </div>
+    <button class="play-again" id="playAgainBtn">다시 심기</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var SIZE = 6;
+  var INITIAL_TILES = 24;
+  var GROWTH_COUNT = 3;
+  var MAX_SOLVE_ATTEMPTS = 30;
+  var SHUFFLE_ATTEMPTS_BEFORE_REGEN = 5;
+
+  var LS_BEST_SCORE = "tengarden-best-score";
+  var LS_BEST_CHAIN = "tengarden-best-chain";
+  var LS_BEST_FLOWERS = "tengarden-best-flowers";
+
+  var board = [];
+  var score = 0;
+  var bestScore = 0;
+  var bestChain = 0;
+  var bestFlowers = 0;
+  var currentMaxChain = 0;
+  var flowerCount = 0;
+  var bigFlowerCount = 0;
+  var growthGauge = 0;
+  var gameOver = false;
+
+  var path = [];
+  var dragging = false;
+
+  var boardEl = document.getElementById("board");
+  var scoreValEl = document.getElementById("scoreVal");
+  var bestValEl = document.getElementById("bestVal");
+  var sumValEl = document.getElementById("sumVal");
+  var sumReadoutEl = document.getElementById("sumReadout");
+  var flowerValEl = document.getElementById("flowerVal");
+  var bigFlowerValEl = document.getElementById("bigFlowerVal");
+  var chainValEl = document.getElementById("chainVal");
+  var gaugeEl = document.getElementById("gauge");
+  var overlayEl = document.getElementById("overlay");
+  var resetBtn = document.getElementById("resetBtn");
+  var playAgainBtn = document.getElementById("playAgainBtn");
+
+  function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+
+  function key(r,c){ return r+","+c; }
+
+  function inBounds(r,c){ return r>=0 && r<SIZE && c>=0 && c<SIZE; }
+
+  function neighbors4(r,c){
+    return [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].filter(function(p){ return inBounds(p[0],p[1]); });
+  }
+
+  function emptyBoard(){
+    var b = [];
+    for(var r=0;r<SIZE;r++){
+      var row = [];
+      for(var c=0;c<SIZE;c++) row.push(null);
+      b.push(row);
+    }
+    return b;
+  }
+
+  function getOccupied(b){
+    var out = [];
+    for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) if(b[r][c]) out.push([r,c]);
+    return out;
+  }
+
+  function getEmpty(b){
+    var out = [];
+    for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) if(!b[r][c]) out.push([r,c]);
+    return out;
+  }
+
+  function shuffleArr(arr){
+    for(var i=arr.length-1;i>0;i--){
+      var j = Math.floor(Math.random()*(i+1));
+      var t = arr[i]; arr[i]=arr[j]; arr[j]=t;
+    }
+    return arr;
+  }
+
+  function shuffleValues(b){
+    var occ = getOccupied(b);
+    var vals = occ.map(function(p){ return b[p[0]][p[1]].value; });
+    shuffleArr(vals);
+    occ.forEach(function(p,i){ b[p[0]][p[1]].value = vals[i]; });
+  }
+
+  function regenerateValues(b){
+    var occ = getOccupied(b);
+    occ.forEach(function(p){ b[p[0]][p[1]].value = randInt(1,9); });
+  }
+
+  function hasValidPath(b){
+    var occ = getOccupied(b);
+    for(var i=0;i<occ.length;i++){
+      if(existsPathFrom(b, occ[i][0], occ[i][1])) return true;
+    }
+    return false;
+  }
+
+  function existsPathFrom(b, sr, sc){
+    var visited = {};
+    function rec(r,c,sum,len){
+      if(sum===10 && len>=2) return true;
+      if(sum>=10) return false;
+      visited[key(r,c)] = true;
+      var neigh = neighbors4(r,c);
+      for(var i=0;i<neigh.length;i++){
+        var nr=neigh[i][0], nc=neigh[i][1];
+        var k = key(nr,nc);
+        if(visited[k]) continue;
+        if(!b[nr][nc]) continue;
+        var ns = sum + b[nr][nc].value;
+        if(ns<=10){
+          if(rec(nr,nc,ns,len+1)) return true;
+        }
+      }
+      delete visited[k=key(r,c)];
+      return false;
+    }
+    return rec(sr,sc,b[sr][sc].value,1);
+  }
+
+  function ensureSolvable(b){
+    var attempts = 0;
+    while(!hasValidPath(b) && attempts<MAX_SOLVE_ATTEMPTS){
+      attempts++;
+      if(attempts<=SHUFFLE_ATTEMPTS_BEFORE_REGEN){
+        shuffleValues(b);
+      } else {
+        regenerateValues(b);
+      }
+    }
+  }
+
+  function applyGravity(b){
+    for(var c=0;c<SIZE;c++){
+      var colVals = [];
+      for(var r=SIZE-1;r>=0;r--){ if(b[r][c]) colVals.push(b[r][c]); }
+      for(var r2=SIZE-1;r2>=0;r2--){
+        var idxFromBottom = SIZE-1-r2;
+        b[r2][c] = colVals[idxFromBottom] || null;
+      }
+    }
+  }
+
+  function spawnGrowth(b, count){
+    var empties = shuffleArr(getEmpty(b)).slice(0,count);
+    empties.forEach(function(p){
+      b[p[0]][p[1]] = { value: randInt(1,9), isNew:true };
+    });
+    return empties.length;
+  }
+
+  function newGame(){
+    board = emptyBoard();
+    var cells = [];
+    for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) cells.push([r,c]);
+    shuffleArr(cells);
+    cells.slice(0,INITIAL_TILES).forEach(function(p){
+      board[p[0]][p[1]] = { value: randInt(1,9), isNew:false };
+    });
+    ensureSolvable(board);
+
+    score = 0;
+    currentMaxChain = 0;
+    flowerCount = 0;
+    bigFlowerCount = 0;
+    growthGauge = 0;
+    gameOver = false;
+    path = [];
+    dragging = false;
+
+    overlayEl.classList.add("hidden");
+    renderAll();
+  }
+
+  function currentSum(){
+    var s = 0;
+    for(var i=0;i<path.length;i++){
+      var p = path[i];
+      s += board[p.r][p.c].value;
+    }
+    return s;
+  }
+
+  function inPath(r,c){
+    for(var i=0;i<path.length;i++) if(path[i].r===r && path[i].c===c) return true;
+    return false;
+  }
+
+  function commitMatch(matched){
+    var n = matched.length;
+    var gained = 5*n*n;
+    score += gained;
+    currentMaxChain = Math.max(currentMaxChain, n);
+
+    if(n===2 || n===3){
+      growthGauge = (growthGauge+1) % 5;
+    } else if(n===4){
+      flowerCount++;
+    } else if(n>=5){
+      bigFlowerCount++;
+    }
+
+    matched.forEach(function(p){ board[p.r][p.c] = null; });
+    applyGravity(board);
+
+    var empties = getEmpty(board);
+    if(empties.length < GROWTH_COUNT){
+      endGame();
+      return;
+    }
+    spawnGrowth(board, GROWTH_COUNT);
+    ensureSolvable(board);
+    renderAll();
+  }
+
+  function endGame(){
+    gameOver = true;
+    var totalFlowers = flowerCount + bigFlowerCount;
+    var newBestScore = score > bestScore;
+    bestScore = Math.max(bestScore, score);
+    bestChain = Math.max(bestChain, currentMaxChain);
+    bestFlowers = Math.max(bestFlowers, totalFlowers);
+    try{
+      localStorage.setItem(LS_BEST_SCORE, String(bestScore));
+      localStorage.setItem(LS_BEST_CHAIN, String(bestChain));
+      localStorage.setItem(LS_BEST_FLOWERS, String(bestFlowers));
+    }catch(e){}
+
+    document.getElementById("finalScore").textContent = score;
+    document.getElementById("finalBest").textContent = bestScore;
+    document.getElementById("finalChain").textContent = currentMaxChain;
+    document.getElementById("finalFlowers").textContent = totalFlowers;
+    document.getElementById("finalScoreRow").classList.toggle("new-best", newBestScore);
+
+    renderAll();
+    overlayEl.classList.remove("hidden");
+  }
+
+  function loadBests(){
+    try{
+      bestScore = parseInt(localStorage.getItem(LS_BEST_SCORE),10) || 0;
+      bestChain = parseInt(localStorage.getItem(LS_BEST_CHAIN),10) || 0;
+      bestFlowers = parseInt(localStorage.getItem(LS_BEST_FLOWERS),10) || 0;
+    }catch(e){
+      bestScore = 0; bestChain = 0; bestFlowers = 0;
+    }
+  }
+
+  function buildBoardDom(){
+    boardEl.innerHTML = "";
+    for(var r=0;r<SIZE;r++){
+      for(var c=0;c<SIZE;c++){
+        var el = document.createElement("div");
+        el.className = "tile empty";
+        el.dataset.r = r;
+        el.dataset.c = c;
+        boardEl.appendChild(el);
+      }
+    }
+  }
+
+  function renderBoard(){
+    for(var r=0;r<SIZE;r++){
+      for(var c=0;c<SIZE;c++){
+        var el = boardEl.children[r*SIZE+c];
+        var cell = board[r][c];
+        el.classList.remove("new-tile");
+        if(!cell){
+          el.className = "tile empty";
+          el.textContent = "";
+          continue;
+        }
+        el.className = "tile" + (cell.isNew ? " new-tile" : "");
+        el.textContent = cell.value;
+        if(cell.isNew){
+          (function(elc){ setTimeout(function(){ elc.classList.remove("new-tile"); }, 260); })(el);
+          cell.isNew = false;
+        }
+      }
+    }
+    updateSelectionVisuals();
+  }
+
+  function updateSelectionVisuals(){
+    for(var i=0;i<boardEl.children.length;i++){
+      boardEl.children[i].classList.remove("selected","ready");
+    }
+    var sum = currentSum();
+    var ready = sum===10 && path.length>=2;
+    path.forEach(function(p){
+      var el = boardEl.children[p.r*SIZE+p.c];
+      el.classList.add("selected");
+      if(ready) el.classList.add("ready");
+    });
+    sumValEl.textContent = sum;
+    sumReadoutEl.classList.toggle("ready", ready);
+    sumReadoutEl.classList.toggle("over", sum>10);
+  }
+
+  function renderStats(){
+    scoreValEl.textContent = score;
+    bestValEl.textContent = bestScore;
+    flowerValEl.textContent = flowerCount;
+    bigFlowerValEl.textContent = bigFlowerCount;
+    chainValEl.textContent = currentMaxChain;
+
+    gaugeEl.innerHTML = "";
+    for(var i=0;i<5;i++){
+      var d = document.createElement("div");
+      d.className = "dot" + (i<growthGauge ? " filled" : "");
+      gaugeEl.appendChild(d);
+    }
+  }
+
+  function renderAll(){
+    renderBoard();
+    renderStats();
+  }
+
+  function flashReject(r,c){
+    var el = boardEl.children[r*SIZE+c];
+    el.classList.add("reject");
+    setTimeout(function(){ el.classList.remove("reject"); }, 220);
+    if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
+  }
+
+  function tileFromPoint(x,y){
+    var el = document.elementFromPoint(x,y);
+    if(!el) return null;
+    var t = el.closest ? el.closest(".tile") : null;
+    if(!t || !t.dataset) return null;
+    return t;
+  }
+
+  function handleEnterTile(r,c){
+    var last = path[path.length-1];
+    if(last.r===r && last.c===c) return;
+
+    if(path.length>=2){
+      var prev = path[path.length-2];
+      if(prev.r===r && prev.c===c){
+        path.pop();
+        updateSelectionVisuals();
+        return;
+      }
+    }
+
+    if(inPath(r,c)) return;
+
+    var dr = Math.abs(r-last.r), dc = Math.abs(c-last.c);
+    if(dr+dc!==1) return;
+
+    var sum = currentSum() + board[r][c].value;
+    if(sum>10){
+      flashReject(r,c);
+      return;
+    }
+    path.push({r:r,c:c});
+    updateSelectionVisuals();
+  }
+
+  function evaluatePath(){
+    var sum = currentSum();
+    if(sum===10 && path.length>=2){
+      var matched = path.slice();
+      path = [];
+      commitMatch(matched);
+    } else {
+      path = [];
+      updateSelectionVisuals();
+    }
+  }
+
+  function onPointerDown(e){
+    if(gameOver) return;
+    var t = e.target.closest ? e.target.closest(".tile") : null;
+    if(!t) return;
+    var r = +t.dataset.r, c = +t.dataset.c;
+    if(!board[r][c]) return;
+    dragging = true;
+    path = [{r:r,c:c}];
+    updateSelectionVisuals();
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerUp);
+    e.preventDefault();
+  }
+
+  function onPointerMove(e){
+    if(!dragging) return;
+    e.preventDefault();
+    var t = tileFromPoint(e.clientX, e.clientY);
+    if(!t) return;
+    var r = +t.dataset.r, c = +t.dataset.c;
+    if(!board[r][c]) return;
+    handleEnterTile(r,c);
+  }
+
+  function onPointerUp(e){
+    if(!dragging) return;
+    dragging = false;
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    document.removeEventListener("pointercancel", onPointerUp);
+    evaluatePath();
+  }
+
+  buildBoardDom();
+  boardEl.addEventListener("pointerdown", onPointerDown);
+  resetBtn.addEventListener("click", function(){
+    if(!gameOver){
+      var ok = window.confirm("현재 진행 중인 판을 포기하고 새로 시작할까요?");
+      if(!ok) return;
+    }
+    newGame();
+  });
+  playAgainBtn.addEventListener("click", newGame);
+
+  loadBests();
+  newGame();
+})();
+</script>
+</body>
+</html>
