@@ -127,6 +127,12 @@
     white-space:nowrap;
   }
   .milestone-toast.show{ opacity:1; transform:translate(-50%,0); }
+  .milestone-toast.crown-toast{
+    background:linear-gradient(135deg,#ffe08a,#d4af37 55%,#b8860b);
+    color:#4a3200;
+    font-size:15px;
+    box-shadow:0 6px 20px rgba(212,175,55,0.5);
+  }
   .score-panel .label{ font-size:11px; color:var(--ink-soft); }
   .score-panel .value{ font-size:22px; font-weight:800; color:var(--accent-deep); }
   .best-panel{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
@@ -204,6 +210,9 @@
   .tile.new-tile{
     animation:drop .22s ease-out;
   }
+  .board.combo-tier-1 .tile:not(.empty){ color:#d4772f; transition:color .3s; }
+  .board.combo-tier-2 .tile:not(.empty){ color:#c23b8e; transition:color .3s; }
+  .board.combo-tier-3 .tile:not(.empty){ color:#7a3fd1; transition:color .3s; }
   @keyframes shake{
     0%,100%{ transform:translateX(0); }
     25%{ transform:translateX(-4px); }
@@ -234,16 +243,21 @@
   .stat-chip .num{ font-size:14px; font-weight:800; color:var(--accent-deep); }
   .stat-chip .label{ font-size:10px; color:var(--ink-soft); }
 
-  .bottom-row{ display:flex; gap:8px; align-items:center; flex:0 0 auto; }
+  .bottom-row{ display:flex; gap:6px; align-items:center; flex:0 0 auto; }
   .reset-btn{
+    flex:1;
+    min-width:0;
     border:none;
     background:var(--panel);
     box-shadow:var(--shadow);
     border-radius:12px;
-    padding:8px 14px;
-    font-size:13px;
+    padding:8px 6px;
+    font-size:12px;
     color:var(--ink-soft);
     font-weight:700;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
   .reset-btn:active{ transform:scale(0.97); }
 
@@ -360,6 +374,18 @@
   .leaderboard-row .rank{ width:22px; font-weight:800; color:var(--ink-soft); flex:0 0 auto; }
   .leaderboard-row .name{ flex:1; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .leaderboard-row .score{ font-weight:800; color:var(--accent-deep); flex:0 0 auto; }
+  .crown-badge{
+    flex:0 0 auto;
+    font-size:11px;
+    font-weight:800;
+    padding:2px 7px;
+    border-radius:999px;
+    white-space:nowrap;
+    color:#4a3200;
+  }
+  .crown-badge.crown-tier-1{ background:linear-gradient(135deg,#e8b083,#cd7f32); color:#3d2000; }
+  .crown-badge.crown-tier-2{ background:linear-gradient(135deg,#e6e6e6,#b0b0b8); color:#333; }
+  .crown-badge.crown-tier-3{ background:linear-gradient(135deg,#ffe08a,#d4af37); color:#4a3200; }
   .leaderboard-empty, .leaderboard-error{ font-size:13px; color:var(--ink-soft); padding:14px 0; text-align:center; }
 
   .rank-highlight{
@@ -428,13 +454,14 @@
   <div class="bottom-row">
     <button class="reset-btn" id="resetBtn">↻ 새 게임</button>
     <button class="reset-btn" id="leaderboardBtn">🏆 랭킹</button>
+    <button class="reset-btn" id="stopBtn">⏸ 그만하기</button>
   </div>
 </div>
 
 <div class="overlay hidden" id="overlay">
   <div class="overlay-card">
-    <h2>정원이 가득 찼습니다</h2>
-    <div class="sub">더 이상 새 숫자를 놓을 자리가 없어요</div>
+    <h2 id="overlayTitle">정원이 가득 찼습니다</h2>
+    <div class="sub" id="overlaySub">더 이상 새 숫자를 놓을 자리가 없어요</div>
     <div class="overlay-stats">
       <div class="overlay-stat-row" id="finalScoreRow"><span class="k">이번 점수</span><span class="v" id="finalScore">0</span></div>
       <div class="overlay-stat-row"><span class="k">최고 점수</span><span class="v" id="finalBest">0</span></div>
@@ -475,6 +502,7 @@
   var LS_BEST_SCORE = "tengarden-best-score";
   var LS_BEST_CHAIN = "tengarden-best-chain";
   var LS_BEST_FLOWERS = "tengarden-best-flowers";
+  var LS_INPROGRESS = "tengarden-inprogress";
 
   var MILESTONES = [150,400,800,1400,2200,3200,4500,6000,8000,10000];
   var COMBO_STEP = 0.1;
@@ -493,6 +521,7 @@
   var maxComboThisRun = 0;
   var milestoneIdx = 0;
   var milestonesReached = 0;
+  var crownIdx = 0;
 
   var path = [];
   var dragging = false;
@@ -510,6 +539,7 @@
   var overlayEl = document.getElementById("overlay");
   var resetBtn = document.getElementById("resetBtn");
   var playAgainBtn = document.getElementById("playAgainBtn");
+  var stopBtn = document.getElementById("stopBtn");
 
   function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
 
@@ -660,6 +690,72 @@
     maxComboThisRun = 0;
     milestoneIdx = 0;
     milestonesReached = 0;
+    crownIdx = 0;
+
+    overlayEl.classList.add("hidden");
+    fitBoard();
+    renderAll();
+    renderCombo();
+    clearInProgress();
+  }
+
+  function serializeState(){
+    var flat = [];
+    for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) flat.push(board[r][c] ? board[r][c].value : null);
+    return {
+      board: flat,
+      score: score,
+      currentMaxChain: currentMaxChain,
+      flowerCount: flowerCount,
+      bigFlowerCount: bigFlowerCount,
+      comboCount: comboCount,
+      maxComboThisRun: maxComboThisRun,
+      milestoneIdx: milestoneIdx,
+      milestonesReached: milestonesReached,
+      crownIdx: crownIdx
+    };
+  }
+
+  function saveInProgress(){
+    try{ localStorage.setItem(LS_INPROGRESS, JSON.stringify(serializeState())); }catch(e){}
+  }
+
+  function clearInProgress(){
+    try{ localStorage.removeItem(LS_INPROGRESS); }catch(e){}
+  }
+
+  function loadInProgress(){
+    try{
+      var raw = localStorage.getItem(LS_INPROGRESS);
+      if(!raw) return null;
+      var data = JSON.parse(raw);
+      if(!data || !Array.isArray(data.board) || data.board.length !== SIZE*SIZE) return null;
+      return data;
+    }catch(e){
+      return null;
+    }
+  }
+
+  function resumeGame(data){
+    board = emptyBoard();
+    for(var i=0;i<data.board.length;i++){
+      if(data.board[i]!=null){
+        var r = Math.floor(i/SIZE), c = i%SIZE;
+        board[r][c] = { value: data.board[i], isNew:false };
+      }
+    }
+    score = data.score || 0;
+    currentMaxChain = data.currentMaxChain || 0;
+    flowerCount = data.flowerCount || 0;
+    bigFlowerCount = data.bigFlowerCount || 0;
+    gameOver = false;
+    path = [];
+    dragging = false;
+    comboCount = data.comboCount || 0;
+    maxComboThisRun = data.maxComboThisRun || 0;
+    milestoneIdx = data.milestoneIdx || 0;
+    milestonesReached = data.milestonesReached || 0;
+    crownIdx = data.crownIdx || 0;
 
     overlayEl.classList.add("hidden");
     fitBoard();
@@ -709,6 +805,7 @@
     applyGravity(board);
 
     checkMilestones();
+    checkCrownMilestones();
 
     var empties = getEmpty(board);
     if(empties.length < GROWTH_COUNT){
@@ -719,6 +816,7 @@
     ensureSolvable(board);
     renderAll();
     renderCombo();
+    saveInProgress();
   }
 
   function checkMilestones(){
@@ -741,6 +839,27 @@
     }, 1400);
   }
 
+  var CROWN_STEP = 10000;
+
+  function checkCrownMilestones(){
+    while(score >= (crownIdx+1)*CROWN_STEP){
+      crownIdx++;
+      showCrownToast(crownIdx);
+    }
+  }
+
+  function showCrownToast(crownCount){
+    var t = document.createElement("div");
+    t.className = "milestone-toast crown-toast";
+    t.textContent = "👑 " + crownCount + "만점 왕관 획득!";
+    document.body.appendChild(t);
+    requestAnimationFrame(function(){ t.classList.add("show"); });
+    setTimeout(function(){
+      t.classList.remove("show");
+      setTimeout(function(){ t.remove(); }, 300);
+    }, 1800);
+  }
+
   function renderCombo(){
     if(comboCount>=2){
       comboBadgeEl.textContent = "🔥×" + comboCount;
@@ -748,10 +867,14 @@
     } else {
       comboBadgeEl.classList.remove("active");
     }
+    var tier = Math.min(Math.floor(comboCount/20), 3);
+    boardEl.classList.remove("combo-tier-1","combo-tier-2","combo-tier-3");
+    if(tier>=1) boardEl.classList.add("combo-tier-" + tier);
   }
 
-  function endGame(){
+  function endGame(voluntary){
     gameOver = true;
+    clearInProgress();
     var totalFlowers = flowerCount + bigFlowerCount;
     var newBestScore = score > bestScore;
     bestScore = Math.max(bestScore, score);
@@ -762,6 +885,14 @@
       localStorage.setItem(LS_BEST_CHAIN, String(bestChain));
       localStorage.setItem(LS_BEST_FLOWERS, String(bestFlowers));
     }catch(e){}
+
+    if(voluntary){
+      document.getElementById("overlayTitle").textContent = "정원 가꾸기를 마쳤습니다";
+      document.getElementById("overlaySub").textContent = "직접 종료했어요 — 기록은 그대로 저장돼요";
+    } else {
+      document.getElementById("overlayTitle").textContent = "정원이 가득 찼습니다";
+      document.getElementById("overlaySub").textContent = "더 이상 새 숫자를 놓을 자리가 없어요";
+    }
 
     document.getElementById("finalScore").textContent = score;
     document.getElementById("finalBest").textContent = bestScore;
@@ -1004,9 +1135,22 @@
     newGame();
   });
   playAgainBtn.addEventListener("click", newGame);
+  stopBtn.addEventListener("click", function(){
+    if(gameOver) return;
+    var ok = window.confirm("여기서 그만하고 기록을 저장할까요?");
+    if(!ok) return;
+    endGame(true);
+  });
 
   loadBests();
-  newGame();
+  (function(){
+    var saved = loadInProgress();
+    if(saved){
+      resumeGame(saved);
+    } else {
+      newGame();
+    }
+  })();
 
   // ---- Leaderboard (Firebase) wiring ----
   var LS_NICKNAME = "tengarden-nickname";
@@ -1092,10 +1236,19 @@
       var name = document.createElement("div");
       name.className = "name";
       name.textContent = row.name || "?";
+      el.appendChild(rank); el.appendChild(name);
+      var crownCount = Math.floor((row.score||0) / 10000);
+      if(crownCount >= 1){
+        var crownTier = Math.min(crownCount, 3); // 1=bronze, 2=silver, 3+=gold
+        var crown = document.createElement("div");
+        crown.className = "crown-badge crown-tier-" + crownTier;
+        crown.textContent = "👑 " + crownCount;
+        el.appendChild(crown);
+      }
       var score = document.createElement("div");
       score.className = "score";
       score.textContent = row.score;
-      el.appendChild(rank); el.appendChild(name); el.appendChild(score);
+      el.appendChild(score);
       leaderboardListEl.appendChild(el);
     });
   }
