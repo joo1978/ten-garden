@@ -234,18 +234,6 @@
   .stat-chip .num{ font-size:14px; font-weight:800; color:var(--accent-deep); }
   .stat-chip .label{ font-size:10px; color:var(--ink-soft); }
 
-  .gauge{
-    display:flex;
-    gap:4px;
-    justify-content:center;
-  }
-  .gauge .dot{
-    width:8px; height:8px;
-    border-radius:50%;
-    background:#d7e6d1;
-  }
-  .gauge .dot.filled{ background:var(--accent); }
-
   .bottom-row{ display:flex; gap:8px; align-items:center; flex:0 0 auto; }
   .reset-btn{
     border:none;
@@ -273,6 +261,8 @@
     padding:26px 22px;
     max-width:340px;
     width:100%;
+    max-height:calc(100dvh - 40px);
+    overflow-y:auto;
     text-align:center;
     box-shadow:0 10px 30px rgba(0,0,0,0.25);
   }
@@ -310,6 +300,67 @@
     border-radius:12px;
   }
   .play-again:active{ transform:scale(0.98); }
+
+  .rank-submit{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    margin-bottom:10px;
+  }
+  .nickname-input{
+    width:100%;
+    border:2px solid var(--tile-border);
+    border-radius:10px;
+    padding:9px 12px;
+    font-size:14px;
+    font-family:inherit;
+    color:var(--ink);
+    background:#fff;
+  }
+  .nickname-input:focus{ outline:none; border-color:var(--accent); }
+  .submit-rank-btn{
+    width:100%;
+    border:none;
+    background:#fff;
+    color:var(--accent-deep);
+    border:2px solid var(--accent);
+    font-weight:800;
+    font-size:14px;
+    padding:9px;
+    border-radius:10px;
+  }
+  .submit-rank-btn:active{ transform:scale(0.98); }
+  .submit-rank-btn:disabled{ opacity:0.5; }
+  .rank-status{
+    min-height:16px;
+    font-size:12px;
+    color:var(--ink-soft);
+  }
+  .rank-status.ok{ color:var(--accent-deep); font-weight:700; }
+  .rank-status.err{ color:var(--danger); }
+
+  .leaderboard-list{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    margin-bottom:16px;
+    text-align:left;
+    max-height:50vh;
+    overflow-y:auto;
+  }
+  .leaderboard-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:7px 10px;
+    background:#f4f9f2;
+    border-radius:10px;
+    font-size:13px;
+  }
+  .leaderboard-row .rank{ width:22px; font-weight:800; color:var(--ink-soft); flex:0 0 auto; }
+  .leaderboard-row .name{ flex:1; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .leaderboard-row .score{ font-weight:800; color:var(--accent-deep); flex:0 0 auto; }
+  .leaderboard-empty, .leaderboard-error{ font-size:13px; color:var(--ink-soft); padding:14px 0; text-align:center; }
 </style>
 </head>
 <body>
@@ -355,14 +406,11 @@
       <div class="num" id="chainVal">0</div>
       <div class="label">최장 연결</div>
     </div>
-    <div class="stat-chip">
-      <div class="icon">🌱</div>
-      <div class="gauge" id="gauge"></div>
-    </div>
   </div>
 
   <div class="bottom-row">
     <button class="reset-btn" id="resetBtn">↻ 새 게임</button>
+    <button class="reset-btn" id="leaderboardBtn">🏆 랭킹</button>
   </div>
 </div>
 
@@ -378,7 +426,21 @@
       <div class="overlay-stat-row"><span class="k">최고 콤보</span><span class="v" id="finalCombo">0</span></div>
       <div class="overlay-stat-row"><span class="k">달성한 목표</span><span class="v" id="finalMilestones">0</span></div>
     </div>
+    <div class="rank-submit">
+      <input type="text" id="nicknameInput" class="nickname-input" placeholder="닉네임 (최대 12자)" maxlength="12">
+      <button class="submit-rank-btn" id="submitRankBtn">랭킹 등록</button>
+      <div class="rank-status" id="rankStatus"></div>
+    </div>
     <button class="play-again" id="playAgainBtn">다시 심기</button>
+  </div>
+</div>
+
+<div class="overlay hidden" id="leaderboardOverlay">
+  <div class="overlay-card">
+    <h2>🏆 랭킹</h2>
+    <div class="sub">지인들과의 최고 기록</div>
+    <div class="leaderboard-list" id="leaderboardList"></div>
+    <button class="play-again" id="closeLeaderboardBtn">닫기</button>
   </div>
 </div>
 
@@ -408,7 +470,6 @@
   var currentMaxChain = 0;
   var flowerCount = 0;
   var bigFlowerCount = 0;
-  var growthGauge = 0;
   var gameOver = false;
   var comboCount = 0;
   var maxComboThisRun = 0;
@@ -427,7 +488,6 @@
   var flowerValEl = document.getElementById("flowerVal");
   var bigFlowerValEl = document.getElementById("bigFlowerVal");
   var chainValEl = document.getElementById("chainVal");
-  var gaugeEl = document.getElementById("gauge");
   var comboBadgeEl = document.getElementById("comboBadge");
   var overlayEl = document.getElementById("overlay");
   var resetBtn = document.getElementById("resetBtn");
@@ -575,7 +635,6 @@
     currentMaxChain = 0;
     flowerCount = 0;
     bigFlowerCount = 0;
-    growthGauge = 0;
     gameOver = false;
     path = [];
     dragging = false;
@@ -622,9 +681,7 @@
     currentMaxChain = Math.max(currentMaxChain, n);
     maxComboThisRun = Math.max(maxComboThisRun, comboCount);
 
-    if(n===2 || n===3){
-      growthGauge = (growthGauge+1) % 5;
-    } else if(n===4){
+    if(n===4){
       flowerCount++;
     } else if(n>=5){
       bigFlowerCount++;
@@ -695,6 +752,10 @@
     document.getElementById("finalCombo").textContent = maxComboThisRun + "연속";
     document.getElementById("finalMilestones").textContent = milestonesReached;
     document.getElementById("finalScoreRow").classList.toggle("new-best", newBestScore);
+
+    lastRunStats = { score: score, chain: currentMaxChain, flowers: totalFlowers };
+    submitRankBtn.disabled = false;
+    setRankStatus("", "");
 
     renderAll();
     overlayEl.classList.remove("hidden");
@@ -807,13 +868,6 @@
     flowerValEl.textContent = flowerCount;
     bigFlowerValEl.textContent = bigFlowerCount;
     chainValEl.textContent = currentMaxChain;
-
-    gaugeEl.innerHTML = "";
-    for(var i=0;i<5;i++){
-      var d = document.createElement("div");
-      d.className = "dot" + (i<growthGauge ? " filled" : "");
-      gaugeEl.appendChild(d);
-    }
   }
 
   function renderAll(){
@@ -934,7 +988,166 @@
 
   loadBests();
   newGame();
+
+  // ---- Leaderboard (Firebase) wiring ----
+  var LS_NICKNAME = "tengarden-nickname";
+  var nicknameInput = document.getElementById("nicknameInput");
+  var submitRankBtn = document.getElementById("submitRankBtn");
+  var rankStatusEl = document.getElementById("rankStatus");
+  var leaderboardBtn = document.getElementById("leaderboardBtn");
+  var leaderboardOverlayEl = document.getElementById("leaderboardOverlay");
+  var leaderboardListEl = document.getElementById("leaderboardList");
+  var closeLeaderboardBtn = document.getElementById("closeLeaderboardBtn");
+
+  var lastRunStats = null;
+
+  function setRankStatus(text, cls){
+    rankStatusEl.textContent = text;
+    rankStatusEl.className = "rank-status" + (cls ? " " + cls : "");
+  }
+
+  try{
+    var savedNickname = localStorage.getItem(LS_NICKNAME);
+    if(savedNickname) nicknameInput.value = savedNickname;
+  }catch(e){}
+
+  submitRankBtn.addEventListener("click", function(){
+    if(!lastRunStats) return;
+    var name = nicknameInput.value.trim();
+    if(!name){
+      setRankStatus("닉네임을 입력해주세요.", "err");
+      return;
+    }
+    if(!window.TG_FB){
+      setRankStatus("랭킹 서버 연결 준비 중이에요. 잠시 후 다시 시도해주세요.", "err");
+      return;
+    }
+    try{ localStorage.setItem(LS_NICKNAME, name); }catch(e){}
+    submitRankBtn.disabled = true;
+    setRankStatus("등록 중...", "");
+    window.TG_FB.submitScore({
+      name: name,
+      score: lastRunStats.score,
+      chain: lastRunStats.chain,
+      flowers: lastRunStats.flowers
+    }).then(function(result){
+      submitRankBtn.disabled = false;
+      if(result.status === "ok"){
+        setRankStatus("랭킹에 등록했습니다! 🎉", "ok");
+      } else if(result.status === "lower"){
+        setRankStatus("이미 더 높은 기록(" + result.existingScore + "점)이 있어요.", "");
+      } else {
+        setRankStatus(result.message || "등록에 실패했습니다.", "err");
+      }
+    });
+  });
+
+  function renderLeaderboard(rows){
+    leaderboardListEl.innerHTML = "";
+    if(!rows || rows.length===0){
+      var empty = document.createElement("div");
+      empty.className = "leaderboard-empty";
+      empty.textContent = "아직 등록된 기록이 없어요. 첫 기록의 주인공이 되어보세요!";
+      leaderboardListEl.appendChild(empty);
+      return;
+    }
+    rows.forEach(function(row, i){
+      var el = document.createElement("div");
+      el.className = "leaderboard-row";
+      var rank = document.createElement("div");
+      rank.className = "rank";
+      rank.textContent = "#" + (i+1);
+      var name = document.createElement("div");
+      name.className = "name";
+      name.textContent = row.name || "?";
+      var score = document.createElement("div");
+      score.className = "score";
+      score.textContent = row.score;
+      el.appendChild(rank); el.appendChild(name); el.appendChild(score);
+      leaderboardListEl.appendChild(el);
+    });
+  }
+
+  leaderboardBtn.addEventListener("click", function(){
+    leaderboardOverlayEl.classList.remove("hidden");
+    leaderboardListEl.innerHTML = '<div class="leaderboard-empty">불러오는 중...</div>';
+    if(!window.TG_FB){
+      leaderboardListEl.innerHTML = '<div class="leaderboard-error">랭킹 서버 연결 준비 중이에요. 잠시 후 다시 시도해주세요.</div>';
+      return;
+    }
+    window.TG_FB.fetchLeaderboard(20).then(function(result){
+      if(result.status === "ok"){
+        renderLeaderboard(result.rows);
+      } else {
+        leaderboardListEl.innerHTML = '<div class="leaderboard-error">' + (result.message || "랭킹을 불러오지 못했습니다.") + '</div>';
+      }
+    });
+  });
+
+  closeLeaderboardBtn.addEventListener("click", function(){
+    leaderboardOverlayEl.classList.add("hidden");
+  });
 })();
+</script>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+  import {
+    getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+
+  var firebaseConfig = {
+    apiKey: "AIzaSyBsNv2jOafEwR9JRVgLKgxFvYkE-e6WtzI",
+    authDomain: "hexagarden.firebaseapp.com",
+    projectId: "hexagarden",
+    storageBucket: "hexagarden.firebasestorage.app",
+    messagingSenderId: "515436589016",
+    appId: "1:515436589016:web:fe41eb41a994ab5cac4cad"
+  };
+
+  var app = initializeApp(firebaseConfig);
+  var db = getFirestore(app);
+  var COLLECTION = "tengarden_scores";
+
+  function normalizeId(name){
+    return name.trim().toLowerCase().replace(/[^a-z0-9가-힣_-]/g, "").slice(0, 20);
+  }
+
+  async function submitScore(entry){
+    var id = normalizeId(entry.name);
+    if(!id) return { status: "error", message: "닉네임을 입력해주세요." };
+    try{
+      var ref = doc(db, COLLECTION, id);
+      var snap = await getDoc(ref);
+      if(snap.exists() && snap.data().score >= entry.score){
+        return { status: "lower", existingScore: snap.data().score };
+      }
+      await setDoc(ref, {
+        name: entry.name.trim().slice(0,12),
+        score: entry.score,
+        chain: entry.chain,
+        flowers: entry.flowers,
+        updatedAt: serverTimestamp()
+      });
+      return { status: "ok" };
+    }catch(err){
+      return { status: "error", message: "등록에 실패했습니다. 네트워크를 확인해주세요." };
+    }
+  }
+
+  async function fetchLeaderboard(n){
+    try{
+      var q = query(collection(db, COLLECTION), orderBy("score", "desc"), limit(n));
+      var snap = await getDocs(q);
+      var rows = [];
+      snap.forEach(function(d){ rows.push(d.data()); });
+      return { status: "ok", rows: rows };
+    }catch(err){
+      return { status: "error", message: "랭킹을 불러오지 못했습니다." };
+    }
+  }
+
+  window.TG_FB = { submitScore: submitScore, fetchLeaderboard: fetchLeaderboard };
 </script>
 </body>
 </html>
