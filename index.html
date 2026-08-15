@@ -361,6 +361,23 @@
   .leaderboard-row .name{ flex:1; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .leaderboard-row .score{ font-weight:800; color:var(--accent-deep); flex:0 0 auto; }
   .leaderboard-empty, .leaderboard-error{ font-size:13px; color:var(--ink-soft); padding:14px 0; text-align:center; }
+
+  .rank-highlight{
+    display:none;
+    background:linear-gradient(135deg,#ffb84d,#ff8a3d);
+    color:#fff;
+    font-weight:800;
+    font-size:13px;
+    padding:10px 12px;
+    border-radius:12px;
+    margin-bottom:12px;
+    animation:pulse-glow 1.4s ease-in-out infinite;
+  }
+  .rank-highlight.show{ display:block; }
+  @keyframes pulse-glow{
+    0%,100%{ box-shadow:0 0 0 rgba(255,138,61,0.5); }
+    50%{ box-shadow:0 0 14px rgba(255,138,61,0.6); }
+  }
 </style>
 </head>
 <body>
@@ -426,6 +443,7 @@
       <div class="overlay-stat-row"><span class="k">최고 콤보</span><span class="v" id="finalCombo">0</span></div>
       <div class="overlay-stat-row"><span class="k">달성한 목표</span><span class="v" id="finalMilestones">0</span></div>
     </div>
+    <div class="rank-highlight" id="rankHighlight">🏆 최고 점수를 기록했습니다! 닉네임을 입력하고 랭킹에 등록해보세요</div>
     <div class="rank-submit">
       <input type="text" id="nicknameInput" class="nickname-input" placeholder="닉네임 (최대 12자)" maxlength="12">
       <button class="submit-rank-btn" id="submitRankBtn">랭킹 등록</button>
@@ -756,6 +774,7 @@
     lastRunStats = { score: score, chain: currentMaxChain, flowers: totalFlowers };
     submitRankBtn.disabled = false;
     setRankStatus("", "");
+    checkTopScoreHighlight(score);
 
     renderAll();
     overlayEl.classList.remove("hidden");
@@ -998,12 +1017,25 @@
   var leaderboardOverlayEl = document.getElementById("leaderboardOverlay");
   var leaderboardListEl = document.getElementById("leaderboardList");
   var closeLeaderboardBtn = document.getElementById("closeLeaderboardBtn");
+  var rankHighlightEl = document.getElementById("rankHighlight");
 
   var lastRunStats = null;
 
   function setRankStatus(text, cls){
     rankStatusEl.textContent = text;
     rankStatusEl.className = "rank-status" + (cls ? " " + cls : "");
+  }
+
+  function checkTopScoreHighlight(finalScore){
+    rankHighlightEl.classList.remove("show");
+    if(!window.TG_FB) return;
+    window.TG_FB.fetchLeaderboard(1).then(function(result){
+      if(result.status !== "ok") return;
+      var currentTop = result.rows.length ? result.rows[0].score : 0;
+      if(finalScore > currentTop){
+        rankHighlightEl.classList.add("show");
+      }
+    });
   }
 
   try{
