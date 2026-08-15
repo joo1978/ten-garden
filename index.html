@@ -89,7 +89,44 @@
     box-shadow:var(--shadow);
     padding:8px 12px;
   }
-  .score-panel{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .score-panel{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative; }
+  .combo-badge{
+    position:absolute;
+    top:-8px; right:6px;
+    background:#ff8a3d;
+    color:#fff;
+    font-size:11px;
+    font-weight:800;
+    padding:3px 8px;
+    border-radius:999px;
+    box-shadow:0 2px 6px rgba(0,0,0,0.2);
+    opacity:0;
+    transform:scale(0.7);
+    transition:opacity .15s, transform .15s;
+    pointer-events:none;
+    white-space:nowrap;
+  }
+  .combo-badge.active{ opacity:1; transform:scale(1); }
+
+  .milestone-toast{
+    position:fixed;
+    top:calc(env(safe-area-inset-top,0px) + 14px);
+    left:50%;
+    transform:translate(-50%,-16px);
+    background:var(--accent-deep);
+    color:#fff;
+    font-weight:800;
+    font-size:14px;
+    padding:10px 18px;
+    border-radius:999px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.25);
+    opacity:0;
+    transition:opacity .25s, transform .25s;
+    z-index:20;
+    pointer-events:none;
+    white-space:nowrap;
+  }
+  .milestone-toast.show{ opacity:1; transform:translate(-50%,0); }
   .score-panel .label{ font-size:11px; color:var(--ink-soft); }
   .score-panel .value{ font-size:22px; font-weight:800; color:var(--accent-deep); }
   .best-panel{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
@@ -279,13 +316,14 @@
 <div class="wrap">
   <header>
     <h1>TEN GARDEN</h1>
-    <p class="rule-line">인접한 숫자를 이어 합이 10이 되게 하세요.<br>길게 연결할수록 더 많은 공간을 만들고 꽃을 피웁니다.</p>
+    <p class="rule-line">인접한(대각선 포함) 숫자를 이어 합이 10이 되거나, 같은 숫자를 이으면 성공!<br>길게 이을수록 점수·콤보·꽃이 커집니다.</p>
   </header>
 
   <div class="hud">
     <div class="panel score-panel">
       <div class="label">SCORE</div>
       <div class="value" id="scoreVal">0</div>
+      <div class="combo-badge" id="comboBadge"></div>
     </div>
     <div class="panel sum-readout" id="sumReadout">
       <div class="num" id="sumVal">0</div>
@@ -337,6 +375,8 @@
       <div class="overlay-stat-row"><span class="k">최고 점수</span><span class="v" id="finalBest">0</span></div>
       <div class="overlay-stat-row"><span class="k">최장 연결</span><span class="v" id="finalChain">0</span></div>
       <div class="overlay-stat-row"><span class="k">피운 꽃</span><span class="v" id="finalFlowers">0</span></div>
+      <div class="overlay-stat-row"><span class="k">최고 콤보</span><span class="v" id="finalCombo">0</span></div>
+      <div class="overlay-stat-row"><span class="k">달성한 목표</span><span class="v" id="finalMilestones">0</span></div>
     </div>
     <button class="play-again" id="playAgainBtn">다시 심기</button>
   </div>
@@ -356,6 +396,10 @@
   var LS_BEST_CHAIN = "tengarden-best-chain";
   var LS_BEST_FLOWERS = "tengarden-best-flowers";
 
+  var MILESTONES = [150,400,800,1400,2200,3200,4500,6000,8000,10000];
+  var COMBO_STEP = 0.1;
+  var COMBO_STEP_CAP = 5; // combo 6+ caps the bonus at +50%
+
   var board = [];
   var score = 0;
   var bestScore = 0;
@@ -366,6 +410,10 @@
   var bigFlowerCount = 0;
   var growthGauge = 0;
   var gameOver = false;
+  var comboCount = 0;
+  var maxComboThisRun = 0;
+  var milestoneIdx = 0;
+  var milestonesReached = 0;
 
   var path = [];
   var dragging = false;
@@ -380,6 +428,7 @@
   var bigFlowerValEl = document.getElementById("bigFlowerVal");
   var chainValEl = document.getElementById("chainVal");
   var gaugeEl = document.getElementById("gauge");
+  var comboBadgeEl = document.getElementById("comboBadge");
   var overlayEl = document.getElementById("overlay");
   var resetBtn = document.getElementById("resetBtn");
   var playAgainBtn = document.getElementById("playAgainBtn");
@@ -390,8 +439,16 @@
 
   function inBounds(r,c){ return r>=0 && r<SIZE && c>=0 && c<SIZE; }
 
-  function neighbors4(r,c){
-    return [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].filter(function(p){ return inBounds(p[0],p[1]); });
+  function neighbors8(r,c){
+    var out = [];
+    for(var dr=-1; dr<=1; dr++){
+      for(var dc=-1; dc<=1; dc++){
+        if(dr===0 && dc===0) continue;
+        var nr=r+dr, nc=c+dc;
+        if(inBounds(nr,nc)) out.push([nr,nc]);
+      }
+    }
+    return out;
   }
 
   function emptyBoard(){
@@ -439,7 +496,13 @@
   function hasValidPath(b){
     var occ = getOccupied(b);
     for(var i=0;i<occ.length;i++){
-      if(existsPathFrom(b, occ[i][0], occ[i][1])) return true;
+      var r=occ[i][0], c=occ[i][1];
+      if(existsPathFrom(b, r, c)) return true;
+      var neigh = neighbors8(r,c);
+      for(var j=0;j<neigh.length;j++){
+        var nr=neigh[j][0], nc=neigh[j][1];
+        if(b[nr][nc] && b[nr][nc].value === b[r][c].value) return true;
+      }
     }
     return false;
   }
@@ -450,7 +513,7 @@
       if(sum===10 && len>=2) return true;
       if(sum>=10) return false;
       visited[key(r,c)] = true;
-      var neigh = neighbors4(r,c);
+      var neigh = neighbors8(r,c);
       for(var i=0;i<neigh.length;i++){
         var nr=neigh[i][0], nc=neigh[i][1];
         var k = key(nr,nc);
@@ -516,10 +579,15 @@
     gameOver = false;
     path = [];
     dragging = false;
+    comboCount = 0;
+    maxComboThisRun = 0;
+    milestoneIdx = 0;
+    milestonesReached = 0;
 
     overlayEl.classList.add("hidden");
     fitBoard();
     renderAll();
+    renderCombo();
   }
 
   function currentSum(){
@@ -531,16 +599,28 @@
     return s;
   }
 
+  function pathStreakValue(){
+    if(path.length===0) return null;
+    var v = board[path[0].r][path[0].c].value;
+    for(var i=1;i<path.length;i++){
+      if(board[path[i].r][path[i].c].value !== v) return null;
+    }
+    return v;
+  }
+
   function inPath(r,c){
     for(var i=0;i<path.length;i++) if(path[i].r===r && path[i].c===c) return true;
     return false;
   }
 
-  function commitMatch(matched){
+  function commitMatch(matched, matchType){
     var n = matched.length;
-    var gained = 5*n*n;
+    var base = matchType==="sum10" ? 5 : 3;
+    var comboMultiplier = 1 + Math.min(comboCount-1, COMBO_STEP_CAP)*COMBO_STEP;
+    var gained = Math.round(base*n*n*comboMultiplier);
     score += gained;
     currentMaxChain = Math.max(currentMaxChain, n);
+    maxComboThisRun = Math.max(maxComboThisRun, comboCount);
 
     if(n===2 || n===3){
       growthGauge = (growthGauge+1) % 5;
@@ -553,6 +633,8 @@
     matched.forEach(function(p){ board[p.r][p.c] = null; });
     applyGravity(board);
 
+    checkMilestones();
+
     var empties = getEmpty(board);
     if(empties.length < GROWTH_COUNT){
       endGame();
@@ -561,6 +643,36 @@
     spawnGrowth(board, GROWTH_COUNT);
     ensureSolvable(board);
     renderAll();
+    renderCombo();
+  }
+
+  function checkMilestones(){
+    while(milestoneIdx<MILESTONES.length && score>=MILESTONES[milestoneIdx]){
+      milestonesReached++;
+      showMilestoneToast(MILESTONES[milestoneIdx]);
+      milestoneIdx++;
+    }
+  }
+
+  function showMilestoneToast(threshold){
+    var t = document.createElement("div");
+    t.className = "milestone-toast";
+    t.textContent = "🎉 " + threshold + "점 돌파!";
+    document.body.appendChild(t);
+    requestAnimationFrame(function(){ t.classList.add("show"); });
+    setTimeout(function(){
+      t.classList.remove("show");
+      setTimeout(function(){ t.remove(); }, 300);
+    }, 1400);
+  }
+
+  function renderCombo(){
+    if(comboCount>=2){
+      comboBadgeEl.textContent = "🔥×" + comboCount;
+      comboBadgeEl.classList.add("active");
+    } else {
+      comboBadgeEl.classList.remove("active");
+    }
   }
 
   function endGame(){
@@ -580,6 +692,8 @@
     document.getElementById("finalBest").textContent = bestScore;
     document.getElementById("finalChain").textContent = currentMaxChain;
     document.getElementById("finalFlowers").textContent = totalFlowers;
+    document.getElementById("finalCombo").textContent = maxComboThisRun + "연속";
+    document.getElementById("finalMilestones").textContent = milestonesReached;
     document.getElementById("finalScoreRow").classList.toggle("new-best", newBestScore);
 
     renderAll();
@@ -667,15 +781,24 @@
       boardEl.children[i].classList.remove("selected","ready");
     }
     var sum = currentSum();
-    var ready = sum===10 && path.length>=2;
+    var streakVal = pathStreakValue();
+    var isSum10 = sum===10 && path.length>=2;
+    var isSameNum = path.length>=2 && streakVal!==null;
+    var ready = isSum10 || isSameNum;
     path.forEach(function(p){
       var el = boardEl.children[p.r*SIZE+p.c];
       el.classList.add("selected");
       if(ready) el.classList.add("ready");
     });
-    sumValEl.textContent = sum;
+    var of10El = sumReadoutEl.querySelector(".of10");
+    if(isSameNum && !isSum10){
+      sumValEl.textContent = streakVal + "×" + path.length;
+      of10El.textContent = "";
+    } else {
+      sumValEl.textContent = sum;
+      of10El.textContent = "/10";
+    }
     sumReadoutEl.classList.toggle("ready", ready);
-    sumReadoutEl.classList.toggle("over", sum>10);
   }
 
   function renderStats(){
@@ -729,10 +852,13 @@
     if(inPath(r,c)) return;
 
     var dr = Math.abs(r-last.r), dc = Math.abs(c-last.c);
-    if(dr+dc!==1) return;
+    if(dr>1 || dc>1) return;
 
-    var sum = currentSum() + board[r][c].value;
-    if(sum>10){
+    var newVal = board[r][c].value;
+    var sum = currentSum() + newVal;
+    var streakVal = pathStreakValue();
+    var streakOk = streakVal!==null && streakVal===newVal;
+    if(sum>10 && !streakOk){
       flashReject(r,c);
       return;
     }
@@ -742,11 +868,20 @@
 
   function evaluatePath(){
     var sum = currentSum();
-    if(sum===10 && path.length>=2){
+    var streakVal = pathStreakValue();
+    var isSum10 = sum===10 && path.length>=2;
+    var isSameNum = path.length>=2 && streakVal!==null;
+    if(isSum10 || isSameNum){
       var matched = path.slice();
+      var matchType = isSum10 ? "sum10" : "sameNumber";
       path = [];
-      commitMatch(matched);
+      comboCount++;
+      commitMatch(matched, matchType);
     } else {
+      if(path.length>=2){
+        comboCount = 0;
+        renderCombo();
+      }
       path = [];
       updateSelectionVisuals();
     }
