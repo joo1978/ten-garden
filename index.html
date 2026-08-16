@@ -1669,8 +1669,10 @@
   // must never be compared against or blended with pre-update ones. Rather than
   // reuse one collection with a version field (which risks a doc-id collision
   // overwriting an old record), the two rulesets get physically separate
-  // collections. Classic is never written to again after this update; a
-  // rulesetVersion field is also stamped on new docs for extra clarity.
+  // collections. Classic is never written to again after this update. The
+  // doc schema intentionally mirrors the classic one exactly (no extra
+  // rulesetVersion field) so it validates against the same Firestore
+  // isValidScore() rule as the classic collection.
   var COLLECTION_CLASSIC = "tengarden_scores";     // pre-update records, read-only from now on
   var COLLECTION_V2 = "tengarden_scores_v2";       // difficulty-tier update records
 
@@ -1696,7 +1698,6 @@
         score: entry.score,
         chain: entry.chain,
         flowers: entry.flowers,
-        rulesetVersion: 2,
         updatedAt: serverTimestamp()
       });
       return { status: "ok" };
