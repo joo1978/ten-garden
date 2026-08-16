@@ -494,7 +494,7 @@
   </header>
 
   <div class="growth-timer hidden" id="growthTimer">
-    <span class="growth-timer-text">🌱 다음 성장 <span id="growthSeconds">15</span>초</span>
+    <span class="growth-timer-text">🌱 다음 성장 <span id="growthSeconds">30</span>초</span>
     <div class="growth-gauge"><div class="growth-gauge-fill" id="growthGaugeFill"></div></div>
   </div>
 
@@ -590,16 +590,30 @@
   var CROWN_STEP = 10000;
 
   // ---- Central difficulty config ----------------------------------------
-  // minScore: crown-tier floor (matches the existing 10,000-point crown step).
+  // Growth pacing is keyed by score directly (not by crown step), so tiers
+  // don't have to land on 10,000-point boundaries — e.g. the two gentle
+  // warm-up steps below 10,000. Sorted ascending by minScore; currentTierConfig()
+  // picks the last entry whose minScore is <= the current score.
   // growthCount: how many new tiles appear after a successful match.
   // autoGrowSec: seconds between automatic single-tile growth ticks (null = off).
-  // crownEmoji/crownLabel/message: shown together with the existing crown toast.
   var DIFFICULTY_TIERS = [
-    { minScore:0,     growthCount:3, autoGrowSec:null, crownEmoji:"",   crownLabel:"",     message:"" },
-    { minScore:10000, growthCount:3, autoGrowSec:15,   crownEmoji:"🥉", crownLabel:"동왕관", message:"정원이 자라기 시작합니다.\n15초마다 새로운 숫자가 자랍니다." },
-    { minScore:20000, growthCount:4, autoGrowSec:15,   crownEmoji:"🥈", crownLabel:"은왕관", message:"정원이 더 무성해집니다.\n이제 성공 후 숫자 4개가 자랍니다." },
-    { minScore:30000, growthCount:4, autoGrowSec:10,   crownEmoji:"🥇", crownLabel:"금왕관", message:"정원의 성장 속도가 빨라집니다.\n10초마다 새로운 숫자가 자랍니다." },
-    { minScore:40000, growthCount:5, autoGrowSec:10,   crownEmoji:"👑", crownLabel:"왕관",   message:"정원이 더욱 빠르게 차오릅니다.\n성공 후 숫자 5개가 자랍니다." }
+    { minScore:0,     growthCount:3, autoGrowSec:30 },   // very gentle warm-up presence only
+    { minScore:5000,  growthCount:3, autoGrowSec:25 },
+    { minScore:10000, growthCount:3, autoGrowSec:15 },
+    { minScore:20000, growthCount:4, autoGrowSec:15 },
+    { minScore:30000, growthCount:4, autoGrowSec:10 },
+    { minScore:40000, growthCount:5, autoGrowSec:10 }
+  ];
+
+  // Crown toast copy, keyed by crown index (1=🥉10,000 .. 4+=👑40,000+).
+  // Kept separate from DIFFICULTY_TIERS since crowns only land on 10,000-point
+  // steps while growth tiers now also include the sub-10,000 warm-up steps.
+  var CROWN_TIERS = [
+    null,
+    { emoji:"🥉", label:"동왕관", message:"정원이 자라기 시작합니다.\n15초마다 새로운 숫자가 자랍니다." },
+    { emoji:"🥈", label:"은왕관", message:"정원이 더 무성해집니다.\n이제 성공 후 숫자 4개가 자랍니다." },
+    { emoji:"🥇", label:"금왕관", message:"정원의 성장 속도가 빨라집니다.\n10초마다 새로운 숫자가 자랍니다." },
+    { emoji:"👑", label:"왕관",   message:"정원이 더욱 빠르게 차오릅니다.\n성공 후 숫자 5개가 자랍니다." }
   ];
 
   var GAME_RULES = {
@@ -995,6 +1009,7 @@
     renderAll();
     renderCombo();
     clearInProgress();
+    startOrUpdateGrowthTimer();
   }
 
   function serializeState(){
@@ -1131,12 +1146,13 @@
     saveInProgress();
   }
 
-  function currentTierIndex(){
-    return Math.min(crownIdx, DIFFICULTY_TIERS.length-1);
-  }
-
   function currentTierConfig(){
-    return DIFFICULTY_TIERS[currentTierIndex()];
+    var tier = DIFFICULTY_TIERS[0];
+    for(var i=1;i<DIFFICULTY_TIERS.length;i++){
+      if(score >= DIFFICULTY_TIERS[i].minScore) tier = DIFFICULTY_TIERS[i];
+      else break;
+    }
+    return tier;
   }
 
   function checkMilestones(){
@@ -1167,13 +1183,13 @@
   }
 
   function showCrownToast(crownCount){
-    var tier = DIFFICULTY_TIERS[Math.min(crownCount, DIFFICULTY_TIERS.length-1)];
+    var info = CROWN_TIERS[Math.min(crownCount, CROWN_TIERS.length-1)];
     var t = document.createElement("div");
     t.className = "milestone-toast crown-toast";
     var lines = [
       (crownCount*CROWN_STEP).toLocaleString() + "점",
-      tier.crownEmoji + " " + tier.crownLabel + " 획득!",
-      tier.message
+      info.emoji + " " + info.label + " 획득!",
+      info.message
     ];
     t.textContent = lines.join("\n");
     document.body.appendChild(t);
