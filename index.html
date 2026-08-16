@@ -130,7 +130,11 @@
   .milestone-toast.crown-toast{
     background:linear-gradient(135deg,#ffe08a,#d4af37 55%,#b8860b);
     color:#4a3200;
-    font-size:15px;
+    font-size:13px;
+    line-height:1.55;
+    white-space:pre-line;
+    text-align:center;
+    max-width:calc(100vw - 40px);
     box-shadow:0 6px 20px rgba(212,175,55,0.5);
   }
   .score-panel .label{ font-size:11px; color:var(--ink-soft); }
@@ -155,6 +159,54 @@
   .sum-readout.ready .num{ color:var(--accent-deep); }
   .sum-readout.over .num{ color:var(--danger); }
   .sum-readout .of10{ font-size:11px; color:var(--ink-soft); }
+
+  .growth-timer{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:var(--panel);
+    border-radius:12px;
+    box-shadow:var(--shadow);
+    padding:6px 12px;
+    flex:0 0 auto;
+    font-size:12px;
+    color:var(--ink-soft);
+    font-weight:700;
+  }
+  .growth-timer.hidden{ display:none; }
+  .growth-timer-text{ white-space:nowrap; }
+  .growth-timer-text #growthSeconds{ color:var(--accent-deep); font-size:13px; }
+  .growth-gauge{
+    flex:1;
+    height:5px;
+    background:#dfeee0;
+    border-radius:999px;
+    overflow:hidden;
+  }
+  .growth-gauge-fill{
+    height:100%;
+    background:linear-gradient(90deg,var(--accent),var(--accent-deep));
+    width:100%;
+    transition:width 1s linear;
+  }
+
+  .sound-toggle{
+    position:fixed;
+    top:calc(env(safe-area-inset-top,0px) + 10px);
+    right:calc(env(safe-area-inset-right,0px) + 10px);
+    width:34px; height:34px;
+    border:none;
+    border-radius:50%;
+    background:var(--panel);
+    box-shadow:var(--shadow);
+    font-size:16px;
+    line-height:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:5;
+  }
+  .sound-toggle:active{ transform:scale(0.92); }
 
   .board-frame{
     background:var(--panel);
@@ -388,6 +440,33 @@
   .crown-badge.crown-tier-3{ background:linear-gradient(135deg,#ffe08a,#d4af37); color:#4a3200; }
   .leaderboard-empty, .leaderboard-error{ font-size:13px; color:var(--ink-soft); padding:14px 0; text-align:center; }
 
+  .leaderboard-tabs{
+    display:flex;
+    gap:6px;
+    margin-bottom:10px;
+  }
+  .leaderboard-tab{
+    flex:1;
+    border:2px solid var(--tile-border);
+    background:#fff;
+    color:var(--ink-soft);
+    font-weight:800;
+    font-size:12px;
+    padding:7px 4px;
+    border-radius:10px;
+  }
+  .leaderboard-tab.active{
+    background:var(--accent);
+    border-color:var(--accent);
+    color:#fff;
+  }
+  .leaderboard-note{
+    font-size:11px;
+    color:var(--ink-soft);
+    margin:-4px 0 10px;
+    text-align:center;
+  }
+
   .rank-highlight{
     display:none;
     background:linear-gradient(135deg,#ffb84d,#ff8a3d);
@@ -407,11 +486,17 @@
 </style>
 </head>
 <body>
+<button class="sound-toggle" id="soundToggleBtn" aria-label="효과음 켜기/끄기">🔇</button>
 <div class="wrap">
   <header>
     <h1>TEN GARDEN</h1>
     <p class="rule-line">인접한(대각선 포함) 숫자를 이어 합이 10이 되거나, 같은 숫자를 이으면 성공!<br>길게 이을수록 점수·콤보·꽃이 커집니다.</p>
   </header>
+
+  <div class="growth-timer hidden" id="growthTimer">
+    <span class="growth-timer-text">🌱 다음 성장 <span id="growthSeconds">15</span>초</span>
+    <div class="growth-gauge"><div class="growth-gauge-fill" id="growthGaugeFill"></div></div>
+  </div>
 
   <div class="hud">
     <div class="panel score-panel">
@@ -484,6 +569,11 @@
   <div class="overlay-card">
     <h2>🏆 랭킹</h2>
     <div class="sub">지인들과의 최고 기록</div>
+    <div class="leaderboard-tabs">
+      <button class="leaderboard-tab active" id="tabNewBtn" type="button">신규 기록</button>
+      <button class="leaderboard-tab" id="tabClassicBtn" type="button">클래식 기록</button>
+    </div>
+    <div class="leaderboard-note" id="leaderboardNote">이번 업데이트(난이도 조정)부터의 새 기록이에요</div>
     <div class="leaderboard-list" id="leaderboardList"></div>
     <button class="play-again" id="closeLeaderboardBtn">닫기</button>
   </div>
@@ -495,14 +585,40 @@
 
   var SIZE = 6;
   var INITIAL_TILES = 28;
-  var GROWTH_COUNT = 3;
   var MAX_SOLVE_ATTEMPTS = 30;
   var SHUFFLE_ATTEMPTS_BEFORE_REGEN = 5;
+  var CROWN_STEP = 10000;
 
+  // ---- Central difficulty config ----------------------------------------
+  // minScore: crown-tier floor (matches the existing 10,000-point crown step).
+  // growthCount: how many new tiles appear after a successful match.
+  // autoGrowSec: seconds between automatic single-tile growth ticks (null = off).
+  // crownEmoji/crownLabel/message: shown together with the existing crown toast.
+  var DIFFICULTY_TIERS = [
+    { minScore:0,     growthCount:3, autoGrowSec:null, crownEmoji:"",   crownLabel:"",     message:"" },
+    { minScore:10000, growthCount:3, autoGrowSec:15,   crownEmoji:"🥉", crownLabel:"동왕관", message:"정원이 자라기 시작합니다.\n15초마다 새로운 숫자가 자랍니다." },
+    { minScore:20000, growthCount:4, autoGrowSec:15,   crownEmoji:"🥈", crownLabel:"은왕관", message:"정원이 더 무성해집니다.\n이제 성공 후 숫자 4개가 자랍니다." },
+    { minScore:30000, growthCount:4, autoGrowSec:10,   crownEmoji:"🥇", crownLabel:"금왕관", message:"정원의 성장 속도가 빨라집니다.\n10초마다 새로운 숫자가 자랍니다." },
+    { minScore:40000, growthCount:5, autoGrowSec:10,   crownEmoji:"👑", crownLabel:"왕관",   message:"정원이 더욱 빠르게 차오릅니다.\n성공 후 숫자 5개가 자랍니다." }
+  ];
+
+  var GAME_RULES = {
+    rulesetVersion: 2,   // bump this and branch storage keys/collections if balance changes again
+    difficultyTiers: DIFFICULTY_TIERS,
+    comboStep: 20,       // combo count per visual/sfx tier step (existing system, unchanged)
+    crownStep: CROWN_STEP
+  };
+
+  // Classic (pre-update) personal-best keys — frozen, read-only from now on.
   var LS_BEST_SCORE = "tengarden-best-score";
   var LS_BEST_CHAIN = "tengarden-best-chain";
   var LS_BEST_FLOWERS = "tengarden-best-flowers";
+  // New-ruleset personal bests, kept separate so classic records are never overwritten.
+  var LS_BEST_SCORE_V2 = "tengarden-best-score-v2";
+  var LS_BEST_CHAIN_V2 = "tengarden-best-chain-v2";
+  var LS_BEST_FLOWERS_V2 = "tengarden-best-flowers-v2";
   var LS_INPROGRESS = "tengarden-inprogress";
+  var LS_SOUND_ENABLED = "tengarden-sound-enabled";
 
   var MILESTONES = [150,400,800,1400,2200,3200,4500,6000,8000,10000];
   var COMBO_STEP = 0.1;
@@ -510,6 +626,7 @@
 
   var board = [];
   var score = 0;
+  var bestScoreClassic = 0, bestChainClassic = 0, bestFlowersClassic = 0;
   var bestScore = 0;
   var bestChain = 0;
   var bestFlowers = 0;
@@ -519,12 +636,19 @@
   var gameOver = false;
   var comboCount = 0;
   var maxComboThisRun = 0;
+  var lastComboStep = 0;
   var milestoneIdx = 0;
   var milestonesReached = 0;
   var crownIdx = 0;
 
   var path = [];
   var dragging = false;
+
+  // ---- Auto-growth timer state -------------------------------------------
+  var growthTimerEndAt = null;      // epoch ms when the next auto-tile should appear
+  var growthTimerIntervalMs = null; // duration of the current cycle (for the gauge)
+  var growthTimerHandle = null;     // single persistent setInterval id
+  var pendingAutoGrowth = false;    // set when the timer fires mid-drag
 
   var boardEl = document.getElementById("board");
   var boardFrameEl = document.getElementById("boardFrame");
@@ -540,6 +664,104 @@
   var resetBtn = document.getElementById("resetBtn");
   var playAgainBtn = document.getElementById("playAgainBtn");
   var stopBtn = document.getElementById("stopBtn");
+  var growthTimerEl = document.getElementById("growthTimer");
+  var growthSecondsEl = document.getElementById("growthSeconds");
+  var growthGaugeFillEl = document.getElementById("growthGaugeFill");
+  var soundToggleBtn = document.getElementById("soundToggleBtn");
+
+  // ---- Sound engine (Web Audio API, synthesized — no audio files) --------
+  // All effects are short oscillator blips generated at runtime, so there is
+  // no external sound-asset dependency, license question, or download weight.
+  var SoundEngine = (function(){
+    var ctx = null;
+    var enabled = true;
+
+    function loadPref(){
+      try{
+        var v = localStorage.getItem(LS_SOUND_ENABLED);
+        enabled = (v === "1"); // default OFF: avoid surprising existing players with sudden sound
+      }catch(e){ enabled = false; }
+    }
+    function savePref(){
+      try{ localStorage.setItem(LS_SOUND_ENABLED, enabled ? "1" : "0"); }catch(e){}
+    }
+    function ensureCtx(){
+      if(!ctx){
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if(!AC) return null;
+        try{ ctx = new AC(); }catch(e){ return null; }
+      }
+      if(ctx.state === "suspended"){
+        try{ ctx.resume(); }catch(e){}
+      }
+      return ctx;
+    }
+    function tone(c, freq, startTime, duration, type, peakGain){
+      var osc = c.createOscillator();
+      var gain = c.createGain();
+      osc.type = type || "sine";
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.linearRampToValueAtTime(peakGain, startTime + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      osc.connect(gain);
+      gain.connect(c.destination);
+      osc.start(startTime);
+      osc.stop(startTime + duration + 0.03);
+    }
+    function play(fn){
+      if(!enabled) return;
+      var c = ensureCtx();
+      if(!c) return;
+      try{ fn(c, c.currentTime); }catch(e){}
+    }
+
+    return {
+      unlock: function(){ ensureCtx(); },
+      isEnabled: function(){ return enabled; },
+      setEnabled: function(v){ enabled = !!v; savePref(); if(enabled) ensureCtx(); },
+      playConnect: function(pathLen){
+        play(function(c,t){
+          var freq = 460 + Math.min(pathLen,10)*16;
+          tone(c, freq, t, 0.055, "sine", 0.10);
+        });
+      },
+      playSuccess: function(){
+        play(function(c,t){
+          tone(c, 660, t, 0.12, "sine", 0.16);
+          tone(c, 880, t+0.05, 0.14, "sine", 0.13);
+        });
+      },
+      playBigSuccess: function(){
+        play(function(c,t){
+          tone(c, 660, t, 0.10, "sine", 0.15);
+          tone(c, 880, t+0.06, 0.12, "sine", 0.15);
+          tone(c, 1108, t+0.13, 0.20, "sine", 0.15);
+        });
+      },
+      playComboStep: function(){
+        play(function(c,t){
+          tone(c, 523, t, 0.09, "triangle", 0.13);
+          tone(c, 784, t+0.07, 0.13, "triangle", 0.13);
+        });
+      },
+      playCrown: function(){
+        play(function(c,t){
+          tone(c, 523.25, t, 0.14, "sine", 0.17);
+          tone(c, 659.25, t+0.09, 0.14, "sine", 0.17);
+          tone(c, 783.99, t+0.18, 0.24, "sine", 0.19);
+        });
+      },
+      playGameOver: function(){
+        play(function(c,t){
+          tone(c, 330, t, 0.28, "sine", 0.11);
+          tone(c, 220, t+0.16, 0.42, "sine", 0.09);
+        });
+      },
+      _init: loadPref
+    };
+  })();
+  SoundEngine._init();
 
   function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
 
@@ -669,7 +891,81 @@
     return empties.length;
   }
 
+  // ---- Auto-growth timer ---------------------------------------------------
+  // Independent of match success: starts once score crosses 10,000 and never
+  // resets on a successful match. Never touches the board while the player is
+  // mid-drag — a fire during a drag is deferred until the pointer is released.
+  function stopGrowthTimer(){
+    if(growthTimerHandle){ clearInterval(growthTimerHandle); growthTimerHandle = null; }
+    growthTimerEndAt = null;
+    growthTimerIntervalMs = null;
+    pendingAutoGrowth = false;
+    growthTimerEl.classList.add("hidden");
+  }
+
+  function startOrUpdateGrowthTimer(){
+    var tier = currentTierConfig();
+    if(!tier.autoGrowSec){
+      stopGrowthTimer();
+      return;
+    }
+    if(growthTimerEndAt == null){
+      growthTimerIntervalMs = tier.autoGrowSec*1000;
+      growthTimerEndAt = Date.now() + growthTimerIntervalMs;
+    }
+    growthTimerEl.classList.remove("hidden");
+    renderGrowthTimer(growthTimerEndAt - Date.now());
+    if(!growthTimerHandle){
+      growthTimerHandle = setInterval(tickGrowthTimer, 1000);
+    }
+  }
+
+  function tickGrowthTimer(){
+    if(growthTimerEndAt == null) return;
+    var remaining = growthTimerEndAt - Date.now();
+    if(remaining <= 0){
+      if(dragging){
+        pendingAutoGrowth = true;
+        renderGrowthTimer(0);
+      } else {
+        performAutoGrowth();
+      }
+      return;
+    }
+    renderGrowthTimer(remaining);
+  }
+
+  // Updates only the small timer label + gauge width (~1x/sec) — never
+  // triggers a full board re-render, keeping the timer essentially free.
+  function renderGrowthTimer(remainingMs){
+    var secs = Math.max(0, Math.ceil(remainingMs/1000));
+    growthSecondsEl.textContent = secs;
+    var pct = growthTimerIntervalMs ? Math.max(0, Math.min(100, (remainingMs/growthTimerIntervalMs)*100)) : 0;
+    growthGaugeFillEl.style.width = pct + "%";
+  }
+
+  function performAutoGrowth(){
+    pendingAutoGrowth = false;
+    if(gameOver) return;
+    var empties = getEmpty(board);
+    if(empties.length > 0){
+      spawnGrowth(board, 1);
+      ensureSolvable(board);
+      renderBoard();
+      saveInProgress();
+    }
+    growthTimerEndAt = null;
+    growthTimerIntervalMs = null;
+    startOrUpdateGrowthTimer();
+  }
+
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "visible") tickGrowthTimer();
+  });
+
   function newGame(){
+    stopGrowthTimer();
+
     board = emptyBoard();
     var cells = [];
     for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) cells.push([r,c]);
@@ -688,9 +984,11 @@
     dragging = false;
     comboCount = 0;
     maxComboThisRun = 0;
+    lastComboStep = 0;
     milestoneIdx = 0;
     milestonesReached = 0;
     crownIdx = 0;
+    pendingAutoGrowth = false;
 
     overlayEl.classList.add("hidden");
     fitBoard();
@@ -703,6 +1001,7 @@
     var flat = [];
     for(var r=0;r<SIZE;r++) for(var c=0;c<SIZE;c++) flat.push(board[r][c] ? board[r][c].value : null);
     return {
+      rulesetVersion: GAME_RULES.rulesetVersion,
       board: flat,
       score: score,
       currentMaxChain: currentMaxChain,
@@ -712,7 +1011,9 @@
       maxComboThisRun: maxComboThisRun,
       milestoneIdx: milestoneIdx,
       milestonesReached: milestonesReached,
-      crownIdx: crownIdx
+      crownIdx: crownIdx,
+      growthTimerEndAt: growthTimerEndAt,
+      growthTimerIntervalMs: growthTimerIntervalMs
     };
   }
 
@@ -737,6 +1038,8 @@
   }
 
   function resumeGame(data){
+    stopGrowthTimer();
+
     board = emptyBoard();
     for(var i=0;i<data.board.length;i++){
       if(data.board[i]!=null){
@@ -753,14 +1056,19 @@
     dragging = false;
     comboCount = data.comboCount || 0;
     maxComboThisRun = data.maxComboThisRun || 0;
+    lastComboStep = Math.floor(comboCount/GAME_RULES.comboStep);
     milestoneIdx = data.milestoneIdx || 0;
     milestonesReached = data.milestonesReached || 0;
     crownIdx = data.crownIdx || 0;
+    pendingAutoGrowth = false;
+    growthTimerEndAt = typeof data.growthTimerEndAt === "number" ? data.growthTimerEndAt : null;
+    growthTimerIntervalMs = typeof data.growthTimerIntervalMs === "number" ? data.growthTimerIntervalMs : null;
 
     overlayEl.classList.add("hidden");
     fitBoard();
     renderAll();
     renderCombo();
+    startOrUpdateGrowthTimer();
   }
 
   function currentSum(){
@@ -801,22 +1109,34 @@
       bigFlowerCount++;
     }
 
+    if(n>=5){ SoundEngine.playBigSuccess(); } else { SoundEngine.playSuccess(); }
+
     matched.forEach(function(p){ board[p.r][p.c] = null; });
     applyGravity(board);
 
     checkMilestones();
     checkCrownMilestones();
 
+    var growthCount = currentTierConfig().growthCount;
     var empties = getEmpty(board);
-    if(empties.length < GROWTH_COUNT){
+    if(empties.length < growthCount){
       endGame();
       return;
     }
-    spawnGrowth(board, GROWTH_COUNT);
+    spawnGrowth(board, growthCount);
     ensureSolvable(board);
+    startOrUpdateGrowthTimer();
     renderAll();
     renderCombo();
     saveInProgress();
+  }
+
+  function currentTierIndex(){
+    return Math.min(crownIdx, DIFFICULTY_TIERS.length-1);
+  }
+
+  function currentTierConfig(){
+    return DIFFICULTY_TIERS[currentTierIndex()];
   }
 
   function checkMilestones(){
@@ -839,8 +1159,6 @@
     }, 1400);
   }
 
-  var CROWN_STEP = 10000;
-
   function checkCrownMilestones(){
     while(score >= (crownIdx+1)*CROWN_STEP){
       crownIdx++;
@@ -849,15 +1167,22 @@
   }
 
   function showCrownToast(crownCount){
+    var tier = DIFFICULTY_TIERS[Math.min(crownCount, DIFFICULTY_TIERS.length-1)];
     var t = document.createElement("div");
     t.className = "milestone-toast crown-toast";
-    t.textContent = "👑 " + crownCount + "만점 왕관 획득!";
+    var lines = [
+      (crownCount*CROWN_STEP).toLocaleString() + "점",
+      tier.crownEmoji + " " + tier.crownLabel + " 획득!",
+      tier.message
+    ];
+    t.textContent = lines.join("\n");
     document.body.appendChild(t);
     requestAnimationFrame(function(){ t.classList.add("show"); });
     setTimeout(function(){
       t.classList.remove("show");
       setTimeout(function(){ t.remove(); }, 300);
-    }, 1800);
+    }, 2200);
+    SoundEngine.playCrown();
   }
 
   function renderCombo(){
@@ -874,16 +1199,18 @@
 
   function endGame(voluntary){
     gameOver = true;
+    stopGrowthTimer();
     clearInProgress();
+    SoundEngine.playGameOver();
     var totalFlowers = flowerCount + bigFlowerCount;
     var newBestScore = score > bestScore;
     bestScore = Math.max(bestScore, score);
     bestChain = Math.max(bestChain, currentMaxChain);
     bestFlowers = Math.max(bestFlowers, totalFlowers);
     try{
-      localStorage.setItem(LS_BEST_SCORE, String(bestScore));
-      localStorage.setItem(LS_BEST_CHAIN, String(bestChain));
-      localStorage.setItem(LS_BEST_FLOWERS, String(bestFlowers));
+      localStorage.setItem(LS_BEST_SCORE_V2, String(bestScore));
+      localStorage.setItem(LS_BEST_CHAIN_V2, String(bestChain));
+      localStorage.setItem(LS_BEST_FLOWERS_V2, String(bestFlowers));
     }catch(e){}
 
     if(voluntary){
@@ -913,11 +1240,19 @@
 
   function loadBests(){
     try{
-      bestScore = parseInt(localStorage.getItem(LS_BEST_SCORE),10) || 0;
-      bestChain = parseInt(localStorage.getItem(LS_BEST_CHAIN),10) || 0;
-      bestFlowers = parseInt(localStorage.getItem(LS_BEST_FLOWERS),10) || 0;
+      bestScore = parseInt(localStorage.getItem(LS_BEST_SCORE_V2),10) || 0;
+      bestChain = parseInt(localStorage.getItem(LS_BEST_CHAIN_V2),10) || 0;
+      bestFlowers = parseInt(localStorage.getItem(LS_BEST_FLOWERS_V2),10) || 0;
     }catch(e){
       bestScore = 0; bestChain = 0; bestFlowers = 0;
+    }
+    try{
+      // Classic keys are never written to again — read-only for display purposes.
+      bestScoreClassic = parseInt(localStorage.getItem(LS_BEST_SCORE),10) || 0;
+      bestChainClassic = parseInt(localStorage.getItem(LS_BEST_CHAIN),10) || 0;
+      bestFlowersClassic = parseInt(localStorage.getItem(LS_BEST_FLOWERS),10) || 0;
+    }catch(e){
+      bestScoreClassic = 0; bestChainClassic = 0; bestFlowersClassic = 0;
     }
   }
 
@@ -1068,6 +1403,7 @@
     }
     path.push({r:r,c:c});
     updateSelectionVisuals();
+    SoundEngine.playConnect(path.length);
   }
 
   function evaluatePath(){
@@ -1080,10 +1416,16 @@
       var matchType = isSum10 ? "sum10" : "sameNumber";
       path = [];
       comboCount++;
+      var comboStep = Math.floor(comboCount/GAME_RULES.comboStep);
+      if(comboStep>lastComboStep && comboStep>=1){
+        lastComboStep = comboStep;
+        SoundEngine.playComboStep();
+      }
       commitMatch(matched, matchType);
     } else {
       if(path.length>=2){
         comboCount = 0;
+        lastComboStep = 0;
         renderCombo();
       }
       path = [];
@@ -1097,9 +1439,11 @@
     if(!t) return;
     var r = +t.dataset.r, c = +t.dataset.c;
     if(!board[r][c]) return;
+    SoundEngine.unlock();
     dragging = true;
     path = [{r:r,c:c}];
     updateSelectionVisuals();
+    SoundEngine.playConnect(path.length);
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerup", onPointerUp);
     document.addEventListener("pointercancel", onPointerUp);
@@ -1123,6 +1467,11 @@
     document.removeEventListener("pointerup", onPointerUp);
     document.removeEventListener("pointercancel", onPointerUp);
     evaluatePath();
+    // Connection judging is fully finished at this point — safe to apply any
+    // auto-growth tile that was deferred because a drag was in progress.
+    if(pendingAutoGrowth && !gameOver){
+      performAutoGrowth();
+    }
   }
 
   buildBoardDom();
@@ -1140,6 +1489,16 @@
     var ok = window.confirm("여기서 그만하고 기록을 저장할까요?");
     if(!ok) return;
     endGame(true);
+  });
+
+  function renderSoundToggle(){
+    soundToggleBtn.textContent = SoundEngine.isEnabled() ? "🔊" : "🔇";
+  }
+  renderSoundToggle();
+  soundToggleBtn.addEventListener("click", function(){
+    SoundEngine.unlock();
+    SoundEngine.setEnabled(!SoundEngine.isEnabled());
+    renderSoundToggle();
   });
 
   loadBests();
@@ -1160,8 +1519,11 @@
   var leaderboardBtn = document.getElementById("leaderboardBtn");
   var leaderboardOverlayEl = document.getElementById("leaderboardOverlay");
   var leaderboardListEl = document.getElementById("leaderboardList");
+  var leaderboardNoteEl = document.getElementById("leaderboardNote");
   var closeLeaderboardBtn = document.getElementById("closeLeaderboardBtn");
   var rankHighlightEl = document.getElementById("rankHighlight");
+  var tabNewBtn = document.getElementById("tabNewBtn");
+  var tabClassicBtn = document.getElementById("tabClassicBtn");
 
   var lastRunStats = null;
 
@@ -1173,7 +1535,7 @@
   function checkTopScoreHighlight(finalScore){
     rankHighlightEl.classList.remove("show");
     if(!window.TG_FB) return;
-    window.TG_FB.fetchLeaderboard(1).then(function(result){
+    window.TG_FB.fetchLeaderboard(1, "v2").then(function(result){
       if(result.status !== "ok") return;
       var currentTop = result.rows.length ? result.rows[0].score : 0;
       if(finalScore > currentTop){
@@ -1253,21 +1615,32 @@
     });
   }
 
-  leaderboardBtn.addEventListener("click", function(){
-    leaderboardOverlayEl.classList.remove("hidden");
+  function loadLeaderboardTab(version){
+    tabNewBtn.classList.toggle("active", version==="v2");
+    tabClassicBtn.classList.toggle("active", version==="classic");
+    leaderboardNoteEl.textContent = version==="v2"
+      ? "이번 업데이트(난이도 조정)부터의 새 기록이에요"
+      : "업데이트 이전 기록이에요 (난이도 조정 전) · 나의 클래식 최고점 " + bestScoreClassic;
     leaderboardListEl.innerHTML = '<div class="leaderboard-empty">불러오는 중...</div>';
     if(!window.TG_FB){
       leaderboardListEl.innerHTML = '<div class="leaderboard-error">랭킹 서버 연결 준비 중이에요. 잠시 후 다시 시도해주세요.</div>';
       return;
     }
-    window.TG_FB.fetchLeaderboard(20).then(function(result){
+    window.TG_FB.fetchLeaderboard(20, version).then(function(result){
       if(result.status === "ok"){
         renderLeaderboard(result.rows);
       } else {
         leaderboardListEl.innerHTML = '<div class="leaderboard-error">' + (result.message || "랭킹을 불러오지 못했습니다.") + '</div>';
       }
     });
+  }
+
+  leaderboardBtn.addEventListener("click", function(){
+    leaderboardOverlayEl.classList.remove("hidden");
+    loadLeaderboardTab("v2");
   });
+  tabNewBtn.addEventListener("click", function(){ loadLeaderboardTab("v2"); });
+  tabClassicBtn.addEventListener("click", function(){ loadLeaderboardTab("classic"); });
 
   closeLeaderboardBtn.addEventListener("click", function(){
     leaderboardOverlayEl.classList.add("hidden");
@@ -1292,7 +1665,18 @@
 
   var app = initializeApp(firebaseConfig);
   var db = getFirestore(app);
-  var COLLECTION = "tengarden_scores";
+  // Difficulty-tier update changed how score is earned, so new-ruleset records
+  // must never be compared against or blended with pre-update ones. Rather than
+  // reuse one collection with a version field (which risks a doc-id collision
+  // overwriting an old record), the two rulesets get physically separate
+  // collections. Classic is never written to again after this update; a
+  // rulesetVersion field is also stamped on new docs for extra clarity.
+  var COLLECTION_CLASSIC = "tengarden_scores";     // pre-update records, read-only from now on
+  var COLLECTION_V2 = "tengarden_scores_v2";       // difficulty-tier update records
+
+  function collectionFor(version){
+    return version === "classic" ? COLLECTION_CLASSIC : COLLECTION_V2;
+  }
 
   function normalizeId(name){
     return name.trim().toLowerCase().replace(/[^a-z0-9가-힣_-]/g, "").slice(0, 20);
@@ -1302,7 +1686,7 @@
     var id = normalizeId(entry.name);
     if(!id) return { status: "error", message: "닉네임을 입력해주세요." };
     try{
-      var ref = doc(db, COLLECTION, id);
+      var ref = doc(db, COLLECTION_V2, id);
       var snap = await getDoc(ref);
       if(snap.exists() && snap.data().score >= entry.score){
         return { status: "lower", existingScore: snap.data().score };
@@ -1312,6 +1696,7 @@
         score: entry.score,
         chain: entry.chain,
         flowers: entry.flowers,
+        rulesetVersion: 2,
         updatedAt: serverTimestamp()
       });
       return { status: "ok" };
@@ -1320,9 +1705,9 @@
     }
   }
 
-  async function fetchLeaderboard(n){
+  async function fetchLeaderboard(n, version){
     try{
-      var q = query(collection(db, COLLECTION), orderBy("score", "desc"), limit(n));
+      var q = query(collection(db, collectionFor(version)), orderBy("score", "desc"), limit(n));
       var snap = await getDocs(q);
       var rows = [];
       snap.forEach(function(d){ rows.push(d.data()); });
