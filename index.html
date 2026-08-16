@@ -494,7 +494,7 @@
   </header>
 
   <div class="growth-timer hidden" id="growthTimer">
-    <span class="growth-timer-text">🌱 다음 성장 <span id="growthSeconds">30</span>초</span>
+    <span class="growth-timer-text">🌱 다음 성장 <span id="growthSeconds">25</span>초</span>
     <div class="growth-gauge"><div class="growth-gauge-fill" id="growthGaugeFill"></div></div>
   </div>
 
@@ -597,7 +597,7 @@
   // growthCount: how many new tiles appear after a successful match.
   // autoGrowSec: seconds between automatic single-tile growth ticks (null = off).
   var DIFFICULTY_TIERS = [
-    { minScore:0,     growthCount:3, autoGrowSec:30 },   // very gentle warm-up presence only
+    { minScore:0,     growthCount:3, autoGrowSec:null }, // no time pressure at all
     { minScore:5000,  growthCount:3, autoGrowSec:25 },
     { minScore:10000, growthCount:3, autoGrowSec:15 },
     { minScore:20000, growthCount:4, autoGrowSec:15 },
